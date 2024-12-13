@@ -3,6 +3,8 @@ import csv
 from langchain.chat_models import ChatOpenAI
 from langchain.prompts import FewShotPromptTemplate, PromptTemplate
 from langchain.schema import SystemMessage, HumanMessage
+import openai
+import requests
 
 # Streamlit 페이지 설정
 st.set_page_config(page_title="문항 생성기", layout="wide")
@@ -11,7 +13,7 @@ st.set_page_config(page_title="문항 생성기", layout="wide")
 chat = ChatOpenAI(
     model="gpt-4-turbo",
     temperature=0.4,
-    max_tokens=500
+    max_tokens=1500
 )
 
 # 교육 데이터
@@ -54,6 +56,7 @@ for i, data in enumerate(education_data):
 
 # 기업 리스트
 companies = [
+    "SK하이닉스",
     "코드스테이츠",
     "KCC",
     "현대모비스",
@@ -63,6 +66,9 @@ companies = [
 
 # 부서 리스트
 departments = [
+    "데이터 엔지니어팀",
+    "데이터 분석팀",
+    "인공지능 연구팀",
     "디지털 마케팅팀",
     "DT 전략 기획팀",
     "교육 컨설팅 팀",
@@ -78,66 +84,168 @@ selected_department = st.selectbox("📍현재 소속 부서를 선택하세요:
 # 사용자 입력 받기
 employee_role = st.text_input("📍최근 주요하게 담당하고 계신 업무를 입력하세요:", placeholder="예: 사내 게시판 뉴스레터 작성 및 내용 검수")
 
-# 고정된 user_input과 f-string 결합
+
+# 키워드 변수 초기화
+news_keywords = None
+
+# 주요 키워드 추출 버튼
+if st.button("임직원 정보 기반 주요 키워드 추출"):
+    if selected_company and selected_department and employee_role.strip():
+        try:
+            # Step 1: OpenAI를 사용해 `employee_role` 요약
+            st.warning("[안내] 직무 키워드 추출 중...")
+            prompt = f"""
+            다음 문장에서 가장 중요한 2개의 핵심 단어를 추출하세요:
+
+            "{employee_role}"
+
+            핵심 단어 2개:
+            """
+            openai_response = openai.ChatCompletion.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are an assistant for extracting keywords."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=200,
+                temperature=0.4
+            )
+            extracted_keywords = openai_response["choices"][0]["message"]["content"].strip()
+            st.write(f"추출된 직무 키워드: {extracted_keywords}")
+
+            # Step 2: DeepSearch API로 뉴스 검색
+            st.warning("[안내] 직무 키워드 기반 뉴스를 검색 중...")
+            formatted_keywords = " AND ".join([f'"{kw.strip()}"' for kw in extracted_keywords.split(",")])
+            search_url = "https://api-v2.deepsearch.com/v1/articles"
+            search_params = {
+                "keyword": f'{formatted_keywords}',
+                "api_key": "e429ace02f9a48388882e71bd52ea740",
+                "date_from": "2024-06-01",
+                "date_to": "2024-11-15"
+            }
+            response = requests.get(search_url, params=search_params)
+
+            if response.status_code == 200:
+                data = response.json()
+                articles = data.get("data", [])[:5]
+                if articles:
+                    # 뉴스 기사 요약 생성
+                    content = "\n\n".join(
+                        f"제목: {article.get('title', '제목 없음')}\n요약: {article.get('summary', '요약 없음')}"
+                        for article in articles
+                    )
+                    st.write("관련 뉴스:")
+                    for i, article in enumerate(articles, start=1):
+                        st.write(f"{i}. {article.get('title', '제목 없음')}")
+
+                    # Step 3: 뉴스에서 주요 키워드 3개 추출
+                    st.warning("[안내] 뉴스 키워드 요약 중...")
+                    news_prompt = f"""
+                    아래 기사 내용을 바탕으로 가장 중요한 키워드 3개를 추출하세요:
+
+                    {content}
+
+                    키워드 3개:
+                    """
+                    news_response = openai.ChatCompletion.create(
+                        model="gpt-4",
+                        messages=[
+                            {"role": "system", "content": "You are an assistant for extracting keywords."},
+                            {"role": "user", "content": news_prompt}
+                        ],
+                        max_tokens=200,
+                        temperature=0.4
+                    )
+                    news_keywords = news_response["choices"][0]["message"]["content"].strip()
+                    st.subheader("[임직원 정보에 기반한 뉴스 검색] -> 뉴스가 갖는 주요 키워드 추출")
+                    st.write(news_keywords)
+                else:
+                    st.warning("관련 기사를 찾을 수 없습니다.")
+            else:
+                st.error(f"뉴스 검색 실패: {response.status_code}")
+        except Exception as e:
+            st.error(f"오류 발생: {str(e)}")
+    else:
+        st.warning("모든 입력값을 입력해주세요!")
+
+# 난이도 선택
+difficulty = st.radio(
+    "지문 생성 시 질문 난이도를 선택하세요:",
+    ("하", "중", "상"),
+    index=1
+)
+
 default_question = "LLM 파인튜닝 역량을 확인할 수 있는 지문을 생성합니다."
-if selected_company.strip() and selected_department.strip() and employee_role.strip():
-    user_input = f"{selected_company} 기업의 {selected_department} 에서 {employee_role}을(를) 담당하는 직원을 대상으로 {default_question}"
-else:
-    user_input = None
+
+# 고정된 user_input과 f-string 결합
+
+user_input = f"{selected_company} 기업에서 {news_keywords} 주제를 대상으로 하는 {default_question} (난이도: {difficulty})"
+
 
 # Session State를 사용해 문항 상태 저장
 if "generated_question" not in st.session_state:
-    st.session_state.generated_question = None
+    st.session_state["generated_question"] = None  # 초기화
+
 
 # 문항 생성 버튼
 if st.button("문항 생성"):
     if user_input:
-        # Prefix에 교육 데이터 및 사용자 정보 포함
-        prefix = (
-            "당신은 역량 평가에 필요한 질문을 생성하는 임무를 맡은 AI 비서입니다.\n"
-            "제공된 Education Data, 임직원 정보를 참고하여 지문을 생성하세요.\n\n"
-            "Education Data:\n"
-            f"- Factor: {education_data[0]['factor']}\n"
-            f"- Sub Factor: {education_data[0]['sub_factor']}\n"
-            f"- Achievement Standard: {education_data[0]['achievement_standard']}\n"
-            f"- Learning Object: {education_data[0]['learning_object']}\n"
-            f"- Learning Target Note: {education_data[0]['learning_target_note']}\n\n"
-        )
+        st.warning("[안내] 문항 내 지문 생성 중...")
+        try:
+            # Prefix에 교육 데이터 및 사용자 정보 포함
+            prefix = (
+                "당신은 역량 평가에 필요한 질문을 생성하는 임무를 맡은 AI 비서입니다.\n"
+                "제공된 Education Data, 임직원 정보를 참고하여 지문을 생성하세요.\n\n"
+                "Education Data:\n"
+                f"- Factor: {education_data[0]['factor']}\n"
+                f"- Sub Factor: {education_data[0]['sub_factor']}\n"
+                f"- Achievement Standard: {education_data[0]['achievement_standard']}\n"
+                f"- Learning Object: {education_data[0]['learning_object']}\n"
+                f"- Learning Target Note: {education_data[0]['learning_target_note']}\n\n"
+            )
+            # FewShotPromptTemplate 정의
+            few_shot_prompt = FewShotPromptTemplate(
+                examples=examples,
+                example_prompt=PromptTemplate(
+                    input_variables=["input", "output"],
+                    template="Input: {input}\nOutput: {output}\n"
+                ),
+                prefix=prefix,
+                suffix="Input: {input}\nOutput:",
+                input_variables=["input"]
+            )
 
-        # FewShotPromptTemplate 정의
-        few_shot_prompt = FewShotPromptTemplate(
-            examples=examples,
-            example_prompt=PromptTemplate(
-                input_variables=["input", "output"],
-                template="Input: {input}\nOutput: {output}\n"
-            ),
-            prefix=prefix,
-            suffix="Input: {input}\nOutput:",
-            input_variables=["input"]
-        )
-
-        # 프롬프트 생성
-        final_prompt = few_shot_prompt.format(input=user_input)
-
-        # ChatCompletion 메시지 리스트 생성
-        messages = [
-            SystemMessage(content="당신은 역량 평가에 필요한 질문을 생성하는 임무를 맡은 AI 비서입니다."),
-            HumanMessage(content=final_prompt)
-        ]
-
-        # Chat 모델 호출
-        response = chat(messages)
-        st.session_state.generated_question = response.content  # 상태에 저장
+            # 프롬프트 생성
+            final_prompt = few_shot_prompt.format(input=user_input)
+            messages = [
+                SystemMessage(content="당신은 역량 평가에 필요한 질문을 생성하는 임무를 맡은 AI 비서입니다."),
+                SystemMessage(content=f"질문의 난이도는 '{difficulty}'로 설정됩니다."),
+                HumanMessage(content=final_prompt)
+            ]
+            # Chat 모델 호출
+            response = chat(messages)
+            st.session_state["generated_question"] = response.content
+            st.success("문항 생성이 완료되었습니다.")
+        except Exception as e:
+            st.error(f"문항 생성 중 오류 발생: {str(e)}")
+    else:
+        st.warning("필요한 정보가 부족하여 문항을 생성할 수 없습니다.")
 
 # 생성된 문항 출력
-if st.session_state.generated_question:
-    st.subheader("생성된 문항:")
-    st.write(st.session_state.generated_question)
+if st.session_state["generated_question"]:
+    st.subheader("생성된 지문:")
+    st.write(st.session_state["generated_question"])
+
+    # 문항 검수자 이름 입력
+    reviewer_name = st.text_input("문항 검수자의 성함을 입력해주세요.", placeholder="예: 이재화")
 
     # CSV 저장 버튼
     if st.button("CSV로 저장"):
-        csv_filename = "generated_questions.csv"
-        with open(csv_filename, mode="a", newline="", encoding="utf-8") as file:
-            writer = csv.writer(file)
-            writer.writerow([st.session_state.generated_question])  # 상태에 저장된 문항 사용
-        st.success(f"문항이 {csv_filename} 파일에 저장되었습니다.")
+        if reviewer_name.strip():  # 검수자 이름이 입력되었는지 확인
+            csv_filename = "generated_questions.csv"
+            with open(csv_filename, mode="a", newline="", encoding="utf-8") as file:
+                writer = csv.writer(file)
+                writer.writerow([st.session_state["generated_question"], reviewer_name])  # 문항과 검수자 이름 저장
+            st.success(f"문항과 검수자 정보가 {csv_filename} 파일에 저장되었습니다.")
+        else:
+            st.warning("검수자 이름을 입력해주세요!")
