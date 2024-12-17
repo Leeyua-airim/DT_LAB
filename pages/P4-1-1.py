@@ -17,6 +17,7 @@ chat = ChatOpenAI(
 # 교육 데이터
 education_data = [
     {
+        "id":4,
         "factor": "생성형 인공지능",
         "sub_factor": "업무에 필요한 생성형 인공지능 서비스 선정 역량",
         "achievement_standard": "단계별로 명확히 정의된 업무를 수행하는데 필요한 인공지능 서비스를 찾아낼 수 있다.",
@@ -36,20 +37,35 @@ examples = [
     },
 ]
 
+# 이미지 데이터
+image_card = {
+    4: "/Users/ijaehwa/langchain/DT_LAB/image_card/P4_card.png",  # ID에 따라 이미지 매핑
+}
+
 # Streamlit UI 구성
-st.title("DTLAB P4_1_1 지문 생성기(내부 PoC용)")
+st.title("DTLAB 생성형 AI (P4_1_1) 지문 생성기(내부 PoC용)")
 # st.write("현재는 지문만을 생성")
-st.write("문항 생성을 위해 필요한 정보를 입력해주세요.")
+st.subheader(":rocket: 문항 생성을 위해 필요한 정보를 입력 후 지문을 생성합니다. ", divider="gray")
 
 # 교육 데이터 표시
 st.sidebar.subheader("학습 맵(요인묶음)")
 for i, data in enumerate(education_data):
-    with st.sidebar.expander(f"P4-1-1(생성형 AI)"):
-        st.write(f"**Factor**: {data['factor']}")
-        st.write(f"**Sub Factor**: {data['sub_factor']}")
-        st.write(f"**Achievement Standard**: {data['achievement_standard']}")
-        st.write(f"**Learning Object**: {data['learning_object']}")
-        st.write(f"**Learning Target Note**: {data['learning_target_note']}")
+    with st.sidebar.expander(f"P4-1-1(생성형 AI)"):                
+        # 이미지 표시
+        if data["id"] in image_card:
+            st.image(
+                image_card[data["id"]],
+                # caption=f"{data['sub_factor']} 이미지",
+                use_container_width=True,
+            )
+        else:
+            st.write("이미지가 없습니다.")
+        
+        st.write(f"**대요인**: {data['factor']}")
+        st.write(f"**중요인**: {data['sub_factor']}")
+        st.write(f"**중요인 성취기준**: {data['achievement_standard']}")
+        st.write(f"**중요인에 대한 학습목표**: {data['learning_object']}")
+        st.write(f"**중요인의 문항 개발시 측정해야할 부분**: {data['learning_target_note']}")
 
 # 기업 리스트
 companies = [
